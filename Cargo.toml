@@ -1,0 +1,52 @@
+[workspace]
+members = [
+    "crates/rc-types",
+    "crates/rc-crypto",
+    "crates/rc-store",
+    "crates/rc-consensus",
+    "crates/rc-state",
+    "crates/rc-rpc",
+    "crates/rc-node",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1"
+
+# Cryptography
+ed25519-dalek = { version = "2", features = ["serde", "rand_core"] }
+blake3 = "1"
+rand = "0.8"
+
+# Storage
+rocksdb = "0.22"
+
+# HTTP
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Internal crates
+rc-types = { path = "crates/rc-types" }
+rc-crypto = { path = "crates/rc-crypto" }
+rc-store = { path = "crates/rc-store" }
+rc-consensus = { path = "crates/rc-consensus" }
+rc-state = { path = "crates/rc-state" }
+rc-rpc = { path = "crates/rc-rpc" }

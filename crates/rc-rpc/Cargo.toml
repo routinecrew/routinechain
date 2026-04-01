@@ -1,0 +1,22 @@
+[package]
+name = "rc-rpc"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rc-types = { workspace = true }
+rc-crypto = { workspace = true }
+rc-state = { workspace = true }
+rc-store = { workspace = true }
+rc-consensus = { workspace = true }
+axum = { workspace = true }
+tower-http = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bincode = { workspace = true }
+tracing = { workspace = true }
+hex = "0.4"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

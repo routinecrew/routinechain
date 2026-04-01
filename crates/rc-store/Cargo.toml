@@ -1,0 +1,13 @@
+[package]
+name = "rc-store"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rc-types = { workspace = true }
+rocksdb = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bincode = { workspace = true }
+blake3 = { workspace = true }
+tracing = { workspace = true }

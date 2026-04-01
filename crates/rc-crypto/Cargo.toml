@@ -1,0 +1,11 @@
+[package]
+name = "rc-crypto"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ed25519-dalek = { workspace = true }
+blake3 = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+bincode = { workspace = true }
