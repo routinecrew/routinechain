@@ -120,10 +120,23 @@ async fn start_node(config_path: &str) {
     // Create consensus message channel for P2P
     let (_msg_sender, mut msg_receiver) = mpsc::channel::<(Id, ConsensusMessage)>(1000);
 
+    // Parse platform keys for anchor authorization
+    let platform_keys: Vec<Id> = config.platform_keys.iter().filter_map(|hex_str| {
+        let bytes = hex::decode(hex_str).ok()?;
+        if bytes.len() != 32 { return None; }
+        let mut id = [0u8; 32];
+        id.copy_from_slice(&bytes);
+        Some(id)
+    }).collect();
+    if !platform_keys.is_empty() {
+        info!("Loaded {} platform key(s) for anchor authorization", platform_keys.len());
+    }
+
     // Create state machine
     let state_machine = Arc::new(Mutex::new(
         StateMachine::new(store.clone(), config.rcw.rewards.clone())
-            .with_dispute_threshold(config.dispute.vote_threshold),
+            .with_dispute_threshold(config.dispute.vote_threshold)
+            .with_platform_keys(platform_keys),
     ));
 
     // Start RPC server

@@ -102,6 +102,17 @@ pub struct SettlementRecord {
     pub recorded_at: i64,
 }
 
+/// Anchor record for CTP Merkle root anchoring
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnchorRecord {
+    pub batch_id: Id,
+    pub merkle_root: [u8; 32],
+    pub entry_count: u64,
+    pub from_entry_id: u64,
+    pub to_entry_id: u64,
+    pub anchored_at: i64,
+}
+
 /// Trust Score computation — pure function, no chain dependency
 pub fn compute_trust_score(p: &Participant) -> u16 {
     if p.total_tx == 0 {
@@ -126,7 +137,7 @@ pub fn compute_trust_score(p: &Participant) -> u16 {
     let rating_score = if p.rating_count > 0 {
         (p.rating_sum as u128 * 2000) / p.rating_count as u128
     } else {
-        5000
+        0
     };
 
     let volume_score = match p.total_volume {
@@ -150,13 +161,20 @@ pub fn compute_trust_score(p: &Participant) -> u16 {
         _ => 10000,
     };
 
-    let total = success_score * W_SUCCESS
+    let raw_total = success_score * W_SUCCESS
         + dispute_score * W_DISPUTE
         + rating_score * W_RATING
         + volume_score * W_VOLUME
         + longevity_score * W_LONGEVITY;
 
-    (total / 100) as u16
+    let maturity_factor: u128 = match p.total_tx {
+        0..=9 => 3000,
+        10..=49 => 6000,
+        50..=99 => 8000,
+        _ => 10000,
+    };
+
+    (raw_total * maturity_factor / 10000 / 100) as u16
 }
 
 /// Events emitted by state transitions
@@ -175,4 +193,5 @@ pub enum Event {
     RCWMinted { to: Id, amount: u64, reason: String },
     RCWTransferred { from: Id, to: Id, amount: u64 },
     RCWSpent { from: Id, amount: u64, purpose: String },
+    AnchorRecorded { batch_id: Id, merkle_root: [u8; 32], entry_count: u64 },
 }

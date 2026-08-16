@@ -9,6 +9,8 @@ pub struct NodeConfig {
     pub rpc: RpcSettings,
     pub rcw: RCWSettings,
     pub dispute: DisputeSettings,
+    #[serde(default)]
+    pub platform_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,6 +100,7 @@ impl Default for NodeConfig {
                 },
             },
             dispute: DisputeSettings::default(),
+            platform_keys: Vec::new(),
         }
     }
 }

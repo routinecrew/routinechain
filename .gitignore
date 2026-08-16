@@ -1,2 +1,5 @@
 /target
 Cargo.lock
+deploy/keys/
+deploy/node*.yml
+*.key

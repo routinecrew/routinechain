@@ -11,6 +11,7 @@ const PREFIX_BALANCE: &[u8] = b"bal/";
 const PREFIX_ESCROW: &[u8] = b"esc/";
 const PREFIX_DISPUTE: &[u8] = b"dsp/";
 const PREFIX_NONCE: &[u8] = b"nnc/";
+const PREFIX_ANCHOR: &[u8] = b"anc/";
 const KEY_LATEST_HEIGHT: &[u8] = b"meta/latest_height";
 
 /// All state prefixes for state root computation
@@ -21,6 +22,7 @@ const STATE_PREFIXES: &[&[u8]] = &[
     PREFIX_ESCROW,
     PREFIX_DISPUTE,
     PREFIX_NONCE,
+    PREFIX_ANCHOR,
 ];
 
 /// RocksDB-backed storage for blocks and state
@@ -141,6 +143,16 @@ impl Store {
         self.db
             .put(&full_key, nonce.to_be_bytes())
             .map_err(|e| e.to_string())
+    }
+
+    // ── Anchor Storage ──
+
+    pub fn get_anchor(&self, batch_id: &Id) -> Result<Option<AnchorRecord>, String> {
+        self.get_state(PREFIX_ANCHOR, batch_id)
+    }
+
+    pub fn set_anchor(&self, batch_id: &Id, record: &AnchorRecord) -> Result<(), String> {
+        self.set_state(PREFIX_ANCHOR, batch_id, record)
     }
 
     // ── Dispute Storage ──

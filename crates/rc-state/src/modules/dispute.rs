@@ -164,10 +164,20 @@ pub fn vote(
 
         if resolution != 2 {
             let winner = if resolution == 0 { escrow.buyer } else { escrow.seller };
+            let loser = if resolution == 0 { escrow.seller } else { escrow.buyer };
 
             if let Some(mut p) = store.get_participant(&winner)? {
                 p.dispute_won = p.dispute_won.saturating_add(1);
+                if dispute.raised_by != winner {
+                    p.dispute_count = p.dispute_count.saturating_sub(1);
+                }
                 store.set_participant(&winner, &p)?;
+            }
+
+            if let Some(mut p) = store.get_participant(&loser)? {
+                let penalty = if dispute.raised_by == loser { 2 } else { 1 };
+                p.dispute_count = p.dispute_count.saturating_add(penalty);
+                store.set_participant(&loser, &p)?;
             }
 
             if dispute_won_reward > 0 {

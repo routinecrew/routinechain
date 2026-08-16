@@ -9,6 +9,7 @@ pub struct StateMachine {
     store: Store,
     reward_config: RewardConfig,
     dispute_vote_threshold: usize,
+    platform_keys: Vec<Id>,
 }
 
 impl StateMachine {
@@ -17,11 +18,17 @@ impl StateMachine {
             store,
             reward_config,
             dispute_vote_threshold: 3,
+            platform_keys: Vec::new(),
         }
     }
 
     pub fn with_dispute_threshold(mut self, threshold: usize) -> Self {
         self.dispute_vote_threshold = threshold;
+        self
+    }
+
+    pub fn with_platform_keys(mut self, keys: Vec<Id>) -> Self {
+        self.platform_keys = keys;
         self
     }
 
@@ -181,6 +188,36 @@ impl StateMachine {
 
             TxPayload::SpendRCW { amount, purpose } => {
                 modules::token::spend(&self.store, &tx.sender, *amount, purpose)
+            }
+
+            // ── CTP: Anchor ──
+            TxPayload::AnchorMerkleRoot {
+                batch_id,
+                merkle_root,
+                entry_count,
+                from_entry_id,
+                to_entry_id,
+            } => {
+                if !self.platform_keys.contains(&tx.sender) {
+                    return Err("Unauthorized: only platform can anchor".to_string());
+                }
+                if self.store.get_anchor(batch_id)?.is_some() {
+                    return Err("Anchor batch already recorded".to_string());
+                }
+                let record = AnchorRecord {
+                    batch_id: *batch_id,
+                    merkle_root: *merkle_root,
+                    entry_count: *entry_count,
+                    from_entry_id: *from_entry_id,
+                    to_entry_id: *to_entry_id,
+                    anchored_at: timestamp,
+                };
+                self.store.set_anchor(batch_id, &record)?;
+                Ok(vec![Event::AnchorRecorded {
+                    batch_id: *batch_id,
+                    merkle_root: *merkle_root,
+                    entry_count: *entry_count,
+                }])
             }
         }
     }
@@ -1040,6 +1077,219 @@ mod tests {
 
         let score = compute_trust_score(&p);
         assert!(score > 0);
+
+        let _ = std::fs::remove_dir_all(path);
+    }
+
+    // ── Trust Score Maturity Tests ──
+
+    #[test]
+    fn test_trust_score_no_rating_gives_zero_rating_component() {
+        let with_rating = Participant {
+            total_tx: 10,
+            success_tx: 10,
+            dispute_count: 0,
+            rating_sum: 450,
+            rating_count: 1,
+            total_volume: 50_000,
+            registered_at: 0,
+            last_activity_at: 86400 * 30,
+            ..Default::default()
+        };
+        let without_rating = Participant {
+            rating_sum: 0,
+            rating_count: 0,
+            ..with_rating.clone()
+        };
+
+        let score_with = compute_trust_score(&with_rating);
+        let score_without = compute_trust_score(&without_rating);
+        assert!(score_with > score_without, "rating should increase score");
+        // 10 tx → maturity 60%. No rating → rating_score = 0.
+        // raw_total without rating: 10000*35 + 10000*25 + 0*20 + 2500*10 + 2000*10 = 645000
+        // 645000 * 6000 / 10000 / 100 = 3870
+        assert_eq!(score_without, 3870);
+    }
+
+    #[test]
+    fn test_trust_score_maturity_factor_scales() {
+        let base = Participant {
+            dispute_count: 0,
+            rating_sum: 0,
+            rating_count: 0,
+            total_volume: 10_000_000,
+            registered_at: 0,
+            last_activity_at: 86400 * 400,
+            ..Default::default()
+        };
+
+        // 5 tx → 30% maturity
+        let s5 = compute_trust_score(&Participant { total_tx: 5, success_tx: 5, ..base.clone() });
+        // 50 tx → 80% maturity
+        let s50 = compute_trust_score(&Participant { total_tx: 50, success_tx: 50, ..base.clone() });
+        // 100 tx → 100% maturity
+        let s100 = compute_trust_score(&Participant { total_tx: 100, success_tx: 100, ..base.clone() });
+
+        assert!(s5 < s50, "5tx ({}) should score less than 50tx ({})", s5, s50);
+        assert!(s50 < s100, "50tx ({}) should score less than 100tx ({})", s50, s100);
+        assert!(s5 > 0, "5tx score should be nonzero");
+    }
+
+    // ── Dispute Loser Penalty Tests ──
+
+    #[test]
+    fn test_dispute_raiser_loses_gets_double_penalty() {
+        let (store, path) = test_store("dispute_raiser_loses");
+        let mut sm = StateMachine::new(store, test_reward_config());
+
+        let buyer_id = [1u8; 32];
+        let seller_id = [2u8; 32];
+        let escrow_id = [10u8; 32];
+        let dispute_id = [20u8; 32];
+
+        sm.execute(&make_tx(
+            TxPayload::RegisterParticipant { id: buyer_id, p_type: ParticipantType::Buyer, metadata: "b".to_string() },
+            buyer_id,
+        ), 1000).unwrap();
+        sm.execute(&make_tx(
+            TxPayload::RegisterParticipant { id: seller_id, p_type: ParticipantType::Seller, metadata: "s".to_string() },
+            seller_id,
+        ), 1000).unwrap();
+        sm.execute(&make_tx(
+            TxPayload::CreateEscrow { escrow_id, buyer: buyer_id, seller: seller_id, amount: 50000, expires_at: 99999 },
+            buyer_id,
+        ), 1000).unwrap();
+
+        // Buyer raises dispute
+        sm.execute(&make_tx(
+            TxPayload::RaiseDispute { dispute_id, escrow_id, reason: DisputeReason::NotDelivered, evidence_hash: [0xAAu8; 32] },
+            buyer_id,
+        ), 2000).unwrap();
+
+        // After raise: seller.dispute_count = 1, buyer.dispute_count = 0
+        assert_eq!(sm.store().get_participant(&seller_id).unwrap().unwrap().dispute_count, 1);
+        assert_eq!(sm.store().get_participant(&buyer_id).unwrap().unwrap().dispute_count, 0);
+
+        let voter1 = [31u8; 32];
+        let voter2 = [32u8; 32];
+        let voter3 = [33u8; 32];
+        for v in [voter1, voter2, voter3] {
+            sm.execute(&make_tx(
+                TxPayload::RegisterParticipant { id: v, p_type: ParticipantType::Arbiter, metadata: "a".to_string() },
+                v,
+            ), 3000).unwrap();
+        }
+
+        // Seller wins (buyer loses as raiser → 2x penalty)
+        sm.execute(&make_tx(TxPayload::VoteDispute { dispute_id, decision: DisputeDecision::FavorSeller }, voter1), 4000).unwrap();
+        sm.execute(&make_tx(TxPayload::VoteDispute { dispute_id, decision: DisputeDecision::FavorSeller }, voter2), 4000).unwrap();
+        sm.execute(&make_tx(TxPayload::VoteDispute { dispute_id, decision: DisputeDecision::FavorBuyer }, voter3), 4000).unwrap();
+
+        let buyer = sm.store().get_participant(&buyer_id).unwrap().unwrap();
+        // Buyer was raiser and lost → +2 penalty
+        assert_eq!(buyer.dispute_count, 2);
+        assert_eq!(buyer.dispute_won, 0);
+
+        let seller = sm.store().get_participant(&seller_id).unwrap().unwrap();
+        // Seller was wrongly targeted → raise-time +1 reversed to 0, then won
+        assert_eq!(seller.dispute_count, 0);
+        assert_eq!(seller.dispute_won, 1);
+
+        let _ = std::fs::remove_dir_all(path);
+    }
+
+    // ── Anchor Tests ──
+
+    #[test]
+    fn test_anchor_merkle_root() {
+        let (store, path) = test_store("anchor_merkle");
+        let platform_key = [42u8; 32];
+        let mut sm = StateMachine::new(store, test_reward_config())
+            .with_platform_keys(vec![platform_key]);
+
+        let batch_id = [100u8; 32];
+        let merkle_root = [0xABu8; 32];
+
+        let events = sm.execute(&make_tx(
+            TxPayload::AnchorMerkleRoot {
+                batch_id,
+                merkle_root,
+                entry_count: 500,
+                from_entry_id: 1,
+                to_entry_id: 500,
+            },
+            platform_key,
+        ), 5000).unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], Event::AnchorRecorded { batch_id: bid, entry_count: 500, .. } if *bid == batch_id));
+
+        let record = sm.store().get_anchor(&batch_id).unwrap().unwrap();
+        assert_eq!(record.merkle_root, merkle_root);
+        assert_eq!(record.entry_count, 500);
+        assert_eq!(record.from_entry_id, 1);
+        assert_eq!(record.to_entry_id, 500);
+        assert_eq!(record.anchored_at, 5000);
+
+        let _ = std::fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn test_anchor_unauthorized_rejected() {
+        let (store, path) = test_store("anchor_unauth");
+        let platform_key = [42u8; 32];
+        let random_sender = [99u8; 32];
+        let mut sm = StateMachine::new(store, test_reward_config())
+            .with_platform_keys(vec![platform_key]);
+
+        let err = sm.execute(&make_tx(
+            TxPayload::AnchorMerkleRoot {
+                batch_id: [100u8; 32],
+                merkle_root: [0xABu8; 32],
+                entry_count: 10,
+                from_entry_id: 1,
+                to_entry_id: 10,
+            },
+            random_sender,
+        ), 5000).unwrap_err();
+
+        assert!(err.contains("Unauthorized"));
+
+        let _ = std::fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn test_anchor_duplicate_rejected() {
+        let (store, path) = test_store("anchor_dup");
+        let platform_key = [42u8; 32];
+        let mut sm = StateMachine::new(store, test_reward_config())
+            .with_platform_keys(vec![platform_key]);
+
+        let batch_id = [100u8; 32];
+
+        sm.execute(&make_tx(
+            TxPayload::AnchorMerkleRoot {
+                batch_id,
+                merkle_root: [0xAAu8; 32],
+                entry_count: 10,
+                from_entry_id: 1,
+                to_entry_id: 10,
+            },
+            platform_key,
+        ), 5000).unwrap();
+
+        let err = sm.execute(&make_tx(
+            TxPayload::AnchorMerkleRoot {
+                batch_id,
+                merkle_root: [0xBBu8; 32],
+                entry_count: 20,
+                from_entry_id: 11,
+                to_entry_id: 30,
+            },
+            platform_key,
+        ), 6000).unwrap_err();
+
+        assert!(err.contains("already recorded"));
 
         let _ = std::fs::remove_dir_all(path);
     }

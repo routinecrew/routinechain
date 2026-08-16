@@ -86,6 +86,15 @@ pub enum TxPayload {
         amount: u64,
         purpose: String,
     },
+
+    // ── CTP: Anchor ──
+    AnchorMerkleRoot {
+        batch_id: Id,
+        merkle_root: [u8; 32],
+        entry_count: u64,
+        from_entry_id: u64,
+        to_entry_id: u64,
+    },
 }
 
 /// Participant types across all domains

@@ -1,0 +1,51 @@
+services:
+  node1:
+    build: .
+    container_name: rcw-node1
+    volumes:
+      - node1-data:/var/lib/rcw
+      - ./deploy/node1.yml:/etc/rcw/config.yml:ro
+      - ./deploy/keys/node1.key:/etc/rcw/validator.key:ro
+    ports:
+      - "26657:26657"
+    networks:
+      rcw-net:
+        ipv4_address: 172.30.0.11
+
+  node2:
+    build: .
+    container_name: rcw-node2
+    volumes:
+      - node2-data:/var/lib/rcw
+      - ./deploy/node2.yml:/etc/rcw/config.yml:ro
+      - ./deploy/keys/node2.key:/etc/rcw/validator.key:ro
+    ports:
+      - "26667:26657"
+    networks:
+      rcw-net:
+        ipv4_address: 172.30.0.12
+
+  node3:
+    build: .
+    container_name: rcw-node3
+    volumes:
+      - node3-data:/var/lib/rcw
+      - ./deploy/node3.yml:/etc/rcw/config.yml:ro
+      - ./deploy/keys/node3.key:/etc/rcw/validator.key:ro
+    ports:
+      - "26677:26657"
+    networks:
+      rcw-net:
+        ipv4_address: 172.30.0.13
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:
+
+networks:
+  rcw-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

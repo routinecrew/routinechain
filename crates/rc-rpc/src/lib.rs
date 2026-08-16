@@ -86,6 +86,8 @@ pub async fn create_router(store: Store, tx_sender: mpsc::Sender<Transaction>) -
         .route("/escrow/{id}", get(get_escrow))
         // CTP: Dispute
         .route("/dispute/{id}", get(get_dispute))
+        // CTP: Anchor
+        .route("/anchor/{id}", get(get_anchor))
         // RCW
         .route("/balance/{id}", get(get_balance))
         // Middleware
@@ -273,6 +275,21 @@ async fn get_dispute(
             result: true,
             message: "ok".to_string(),
             data: Some(d),
+        })),
+        _ => Err(StatusCode::NOT_FOUND),
+    }
+}
+
+async fn get_anchor(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<AnchorRecord>>, StatusCode> {
+    let id = hex_to_id(&id).map_err(|_| StatusCode::BAD_REQUEST)?;
+    match state.store.get_anchor(&id) {
+        Ok(Some(a)) => Ok(Json(ApiResponse {
+            result: true,
+            message: "ok".to_string(),
+            data: Some(a),
         })),
         _ => Err(StatusCode::NOT_FOUND),
     }
